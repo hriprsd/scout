@@ -378,7 +378,7 @@ def generate_tree(slug: str, repo_path: str) -> str:
             }
             # If many sub-packages folded in, show their names
             # instead of symbols from one arbitrary sub-package
-            if len(visible_pkgs) > 3:
+            if len(visible_pkgs) > 6:
                 names = sorted(visible_pkgs)[:8]
                 names_str = ", ".join(names)
                 if len(visible_pkgs) > 8:
@@ -387,6 +387,20 @@ def generate_tree(slug: str, repo_path: str) -> str:
                     f"  {child_name}/ ({len(child_cards)} files)"
                     f" [{names_str}]"
                 )
+            elif len(visible_pkgs) > 3:
+                # Medium count: expand each sub-package with symbols
+                lines.append(f"  {child_name}/ ({len(child_cards)} files)")
+                for pkg in sorted(visible_pkgs):
+                    pkg_prefix = str(Path(child_key) / pkg)
+                    pkg_cards = [
+                        c for d in dir_paths
+                        if d.startswith(pkg_prefix)
+                        for c in cards_by_dir[d]
+                    ]
+                    if pkg_cards:
+                        pkg_summary = _dir_summary(pkg_cards, dir_name=pkg)
+                        pkg_detail = f" - {pkg_summary}" if pkg_summary else ""
+                        lines.append(f"    {pkg}/ ({len(pkg_cards)} files){pkg_detail}")
             else:
                 child_summary = _dir_summary(child_cards, dir_name=child_name)
                 child_detail = f" - {child_summary}" if child_summary else ""
@@ -422,6 +436,9 @@ def _symbol_rank(name: str) -> int:
     # Exception subclasses: BadParameter(UsageError), HTTPError(Exception)
     if paren and any(x in paren for x in ("Error", "Exception")):
         return 3
+    # Enum and TypedDict types are supporting, not primary API
+    if paren and any(x in paren for x in ("enum.", "Enum", "IntEnum", "TypedDict")):
+        return 2
     # Go unexported: lowercase initial letter, no underscore
     if bare[0:1].islower():
         return 2
