@@ -1,0 +1,34 @@
+---
+description: Use scout for codebase context instead of scanning files manually
+globs: **/*
+alwaysApply: true
+---
+
+# Codebase context via Scout
+
+Before exploring an unfamiliar repo or when you need to understand the project structure, use scout to get a hierarchical summary instead of reading files individually.
+
+## Commands
+
+- `scout context` - L0 workset (active changes) + L1 repo map (directory summaries). Start here.
+- `scout context --full` - also include L2 file cards for related files. Use when you need more detail.
+- `scout card <file>` - compact summary of a specific file. Use before reading the full file.
+- `scout tree` - directory-level overview of the entire repo.
+- `scout ls <dir>` - list all file cards in a directory.
+
+## When to use
+
+- Starting any task: run `scout context` first to understand the repo and what the user is working on.
+- Before reading a file: run `scout card <file>` to check if you actually need the full content.
+- When asked about repo structure: run `scout tree` instead of `find` or directory listings.
+
+## Setup
+
+If scout is not initialized for the current repo:
+```bash
+scout init . && scout warm
+```
+
+## Key rule
+
+Prefer scout cards over opening files just to understand what they contain. Only read the full file when you need to edit it or see implementation details.
