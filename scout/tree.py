@@ -154,6 +154,60 @@ def generate_tree(slug: str, repo_path: str) -> str:
     return "\n".join(lines)
 
 
+def _dedup(items: list[str]) -> list[str]:
+    """Deduplicate while preserving order."""
+    seen: set[str] = set()
+    result = []
+    for item in items:
+        if item not in seen:
+            seen.add(item)
+            result.append(item)
+    return result
+
+
+_NOISE_SUFFIXES = ("Warning", "Error", "Exception", "Mixin")
+
+
+def _symbol_rank(name: str) -> int:
+    """Lower rank = more likely to be public API. Used for sorting."""
+    bare = name.split("(")[0].strip()
+    # Noise suffixes (warnings, errors, mixins) -- least interesting
+    if bare.endswith(_NOISE_SUFFIXES):
+        return 4
+    # Underscore-prefixed -- private/internal
+    if bare.startswith("_"):
+        return 3
+    # Go unexported: lowercase initial letter, no underscore
+    # (also catches some C/Rust internal names, which is fine)
+    if bare[0:1].islower():
+        return 2
+    # Test-prefixed functions
+    if bare.startswith("Test"):
+        return 1
+    # Public, exported, capitalized -- best
+    return 0
+
+
+def _rank_symbols(items: list[str]) -> list[str]:
+    """Deduplicate and sort symbols by public-API likelihood."""
+    deduped = _dedup(items)
+    deduped.sort(key=_symbol_rank)
+    return deduped
+
+
+def _rank_functions(items: list[str]) -> list[str]:
+    """Deduplicate functions by name, rank by public-API likelihood."""
+    seen: set[str] = set()
+    unique = []
+    for f in items:
+        name = f.split("(")[0].strip()
+        if name and name not in seen:
+            seen.add(name)
+            unique.append(name)
+    unique.sort(key=_symbol_rank)
+    return unique
+
+
 def _dir_summary(cards: list[Card], dir_name: str = "") -> str:
     """Build a concise summary from cards, filtering noise."""
     # Words from the directory name itself are redundant
@@ -172,39 +226,13 @@ def _dir_summary(cards: list[Card], dir_name: str = "") -> str:
     src_cards = [c for c in cards if not _is_test_file(c.rel_path)]
     test_cards = [c for c in cards if _is_test_file(c.rel_path)]
     for c in src_cards + test_cards:
-        # Prefer public classes over private/internal
-        pub_cls = [x for x in c.classes if not x.startswith("_")]
-        prv_cls = [x for x in c.classes if x.startswith("_")]
-        all_classes.extend(pub_cls[:2])
-        all_classes.extend(prv_cls[:1])
+        all_classes.extend(c.classes[:3])
         all_exports.extend(c.exports[:3])
-        # Prefer public functions, deprioritize Test* and underscore
-        public = [f for f in c.functions
-                  if not f.lstrip().startswith(("_", "Test"))]
-        test_fn = [f for f in c.functions if f.lstrip().startswith("Test")]
-        private = [f for f in c.functions if f.lstrip().startswith("_")]
-        all_functions.extend(public[:3])
-        all_functions.extend(test_fn[:1])
-        all_functions.extend(private[:1])
+        all_functions.extend(c.functions[:4])
 
-    # Deduplicate while preserving order
-    def _dedup(items: list[str]) -> list[str]:
-        seen: set[str] = set()
-        result = []
-        for item in items:
-            if item not in seen:
-                seen.add(item)
-                result.append(item)
-        return result
-
-    all_classes = _dedup(all_classes)
+    all_classes = _rank_symbols(all_classes)
     all_exports = _dedup(all_exports)
-
-    # Deprioritize noise classes (warnings, errors, mixins)
-    _NOISE_SUFFIXES = ("Warning", "Error", "Exception", "Mixin")
-    core = [c for c in all_classes if not c.endswith(_NOISE_SUFFIXES)]
-    noise = [c for c in all_classes if c.endswith(_NOISE_SUFFIXES)]
-    all_classes = core + noise
+    all_functions = _rank_functions(all_functions)
 
     # Prefer classes, then exports, then top functions
     if all_classes:
@@ -212,15 +240,7 @@ def _dir_summary(cards: list[Card], dir_name: str = "") -> str:
     if all_exports:
         return ", ".join(all_exports[:4])
     if all_functions:
-        names = []
-        seen: set[str] = set()
-        for f in all_functions:
-            name = f.split("(")[0].strip()
-            if name and name not in seen:
-                seen.add(name)
-                names.append(name)
-        if names:
-            return ", ".join(names[:4])
+        return ", ".join(all_functions[:4])
 
     # No structural symbols found. Don't fall back to purpose keywords
     # because they're usually noise ("Application entry point for X").
