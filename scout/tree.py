@@ -10,8 +10,8 @@ from pathlib import Path
 from scout.card import Card, load_card
 from scout.config import cards_dir
 
-# Directories that get collapsed into a single summary line
-_LOW_VALUE_PREFIXES = (
+# Top-level dirs that get a single collapsed line (no subdirs listed)
+_COLLAPSED_DIRS = {
     "test", "tests", "spec", "specs", "__tests__",
     "docs", "doc", "documentation",
     ".github", ".circleci", ".gitlab",
@@ -19,17 +19,15 @@ _LOW_VALUE_PREFIXES = (
     "fixtures", "testdata", "test_data",
     "static", "public", "assets",
     "vendor", "third_party",
-)
+}
 
-
-def _is_low_value_dir(dir_path: str) -> bool:
-    """Check if a directory should be collapsed in the tree."""
-    parts = Path(dir_path).parts
-    if not parts:
-        return False
-    # Check if any path component is a low-value prefix
-    top = parts[0].lower()
-    return top in _LOW_VALUE_PREFIXES
+# Summary words that are noise (language names, obvious labels)
+_NOISE_WORDS = {
+    "terraform", "python", "javascript", "typescript", "go", "rust",
+    "java", "ruby", "shell", "yaml", "toml", "json", "markdown",
+    "html", "css", "c", "cpp", "sql", "configuration", "module",
+    "application",
+}
 
 
 def generate_tree(slug: str, repo_path: str) -> str:
@@ -54,96 +52,143 @@ def generate_tree(slug: str, repo_path: str) -> str:
 
     lines = ["# Repository Map\n"]
 
-    # Surface entry points from pyproject.toml if available
+    # Entry points
     entry_points = _find_entry_points(repo_path)
     if entry_points:
-        lines.append("## Entry Points")
         for ep in entry_points:
-            lines.append(f"- {ep}")
+            lines.append(f"Entry: {ep}")
         lines.append("")
 
-    # Collapse low-value directories: group all subdirs under the
-    # top-level low-value dir into one summary line
-    collapsed: dict[str, dict] = {}  # top_dir -> {files, lines, subdirs}
-    normal_dirs: list[str] = []
-
+    # Group all dirs by their top-level parent
+    groups: dict[str, list[str]] = defaultdict(list)
     for dir_path in sorted(cards_by_dir.keys()):
         if dir_path == "(root)":
-            normal_dirs.append(dir_path)
+            groups["(root)"].append(dir_path)
+        else:
+            top = Path(dir_path).parts[0]
+            groups[top].append(dir_path)
+
+    # Render each group
+    for group_name in sorted(groups.keys()):
+        dir_paths = groups[group_name]
+
+        if group_name == "(root)":
+            cards = cards_by_dir["(root)"]
+            summary = _dir_summary(cards)
+            detail = f" - {summary}" if summary else ""
+            lines.append(f"./ ({len(cards)} files){detail}")
             continue
 
-        top = Path(dir_path).parts[0]
-        if top.lower() in _LOW_VALUE_PREFIXES:
-            if top not in collapsed:
-                collapsed[top] = {"files": 0, "lines": 0, "subdirs": set()}
-            cards = cards_by_dir[dir_path]
-            collapsed[top]["files"] += len(cards)
-            collapsed[top]["lines"] += sum(c.lines for c in cards)
-            if dir_path != top:
-                collapsed[top]["subdirs"].add(dir_path)
+        # Aggregate stats for the whole group
+        total_files = sum(len(cards_by_dir[d]) for d in dir_paths)
+        total_lines = sum(
+            sum(c.lines for c in cards_by_dir[d]) for d in dir_paths
+        )
+
+        # Collapsed dirs or groups with many subdirs: single line
+        if (group_name.lower() in _COLLAPSED_DIRS
+                or len(dir_paths) > 6):
+            sub_count = len(dir_paths) - (1 if group_name in dir_paths else 0)
+            sub_note = f", {sub_count} subdirs" if sub_count > 0 else ""
+            # For large groups, list the subdir names compactly
+            if len(dir_paths) > 6 and group_name.lower() not in _COLLAPSED_DIRS:
+                child_names = []
+                for d in dir_paths:
+                    parts = Path(d).parts
+                    if len(parts) == 2:
+                        child_names.append(parts[1])
+                if child_names:
+                    names_str = ", ".join(child_names[:12])
+                    if len(child_names) > 12:
+                        names_str += f", +{len(child_names) - 12} more"
+                    lines.append(
+                        f"{group_name}/ ({total_files} files, "
+                        f"{total_lines} lines{sub_note})"
+                    )
+                    lines.append(f"  [{names_str}]")
+                else:
+                    lines.append(
+                        f"{group_name}/ ({total_files} files, "
+                        f"{total_lines} lines{sub_note})"
+                    )
+            else:
+                lines.append(
+                    f"{group_name}/ ({total_files} files, "
+                    f"{total_lines} lines{sub_note})"
+                )
+            continue
+
+        # Small group (1-6 subdirs): show top-level with summary,
+        # then subdirs indented
+        if len(dir_paths) == 1:
+            d = dir_paths[0]
+            cards = cards_by_dir[d]
+            summary = _dir_summary(cards)
+            detail = f" - {summary}" if summary else ""
+            lines.append(
+                f"{d}/ ({len(cards)} files, "
+                f"{sum(c.lines for c in cards)} lines){detail}"
+            )
         else:
-            normal_dirs.append(dir_path)
-
-    # Emit normal directories with full detail
-    for dir_path in normal_dirs:
-        cards = cards_by_dir[dir_path]
-        total_lines = sum(c.lines for c in cards)
-        file_count = len(cards)
-
-        summary = _dir_summary(cards)
-
-        lines.append(f"## {dir_path}/ ({file_count} files, {total_lines} lines)")
-        if summary:
-            lines.append(summary)
-        lines.append("")
-
-    # Emit collapsed directories as single lines
-    for top_dir in sorted(collapsed.keys()):
-        info = collapsed[top_dir]
-        subdir_count = len(info["subdirs"])
-        sub_note = f", {subdir_count} subdirs" if subdir_count > 0 else ""
-        lines.append(f"## {top_dir}/ ({info['files']} files, {info['lines']} lines{sub_note})")
-        lines.append("")
+            # Group header
+            all_cards = []
+            for d in dir_paths:
+                all_cards.extend(cards_by_dir[d])
+            summary = _dir_summary(all_cards)
+            detail = f" - {summary}" if summary else ""
+            lines.append(
+                f"{group_name}/ ({total_files} files, "
+                f"{total_lines} lines){detail}"
+            )
+            # Subdirs as indented lines
+            for d in dir_paths:
+                if d == group_name:
+                    continue
+                cards = cards_by_dir[d]
+                # Show relative path from group
+                rel = str(Path(d).relative_to(group_name))
+                sub_summary = _dir_summary(cards)
+                sub_detail = f" - {sub_summary}" if sub_summary else ""
+                lines.append(
+                    f"  {rel}/ ({len(cards)} files){sub_detail}"
+                )
 
     return "\n".join(lines)
 
 
 def _dir_summary(cards: list[Card]) -> str:
-    """Build a concise summary for a directory from its cards."""
-    all_exports = []
+    """Build a concise summary from cards, filtering noise."""
     all_classes = []
+    all_exports = []
     for c in cards:
-        all_exports.extend(c.exports[:3])
         all_classes.extend(c.classes[:2])
+        all_exports.extend(c.exports[:3])
 
-    summary_parts = []
-    if all_classes:
-        summary_parts.append(", ".join(all_classes[:3]))
-    if all_exports and not all_classes:
-        summary_parts.append(", ".join(all_exports[:4]))
+    # Prefer classes, then exports
+    symbols = all_classes[:3] if all_classes else all_exports[:4]
+    if symbols:
+        return ", ".join(symbols)
 
-    if summary_parts:
-        return "; ".join(summary_parts[:2])
-
-    # Fall back to purpose keywords
+    # Fall back to purpose keywords, filtering noise
     purposes = set()
     for c in cards:
         if c.purpose:
-            first_word = c.purpose.split(" ")[0].rstrip("s")
-            purposes.add(first_word)
-    return ", ".join(sorted(purposes)[:3])
+            for word in c.purpose.lower().split():
+                word = word.rstrip("s").strip()
+                if word and word not in _NOISE_WORDS and len(word) > 2:
+                    purposes.add(word)
+    filtered = sorted(purposes)[:3]
+    return ", ".join(filtered) if filtered else ""
 
 
 def _find_entry_points(repo_path: str) -> list[str]:
-    """Extract CLI entry points from pyproject.toml or setup.cfg."""
+    """Extract CLI entry points from pyproject.toml or package.json."""
     results = []
 
-    # pyproject.toml
     pyproject = Path(repo_path) / "pyproject.toml"
     if pyproject.exists():
         try:
             content = pyproject.read_text()
-            # Parse [project.scripts] section
             in_scripts = False
             for line in content.splitlines():
                 stripped = line.strip()
@@ -158,7 +203,6 @@ def _find_entry_points(repo_path: str) -> list[str]:
         except (OSError, PermissionError):
             pass
 
-    # package.json
     pkg_json = Path(repo_path) / "package.json"
     if pkg_json.exists():
         try:
