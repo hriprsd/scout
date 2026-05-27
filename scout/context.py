@@ -1,7 +1,7 @@
 """Context assembly - the main output of scout.
 
 Produces a hierarchical context blob optimized for LLM consumption:
-  L0 - Working set (full content of active files)
+  L0 - Working set (cards for active files, full source only with --full)
   L1 - Repository tree (directory summaries)
   L2 - Cards for related files
 """
@@ -27,7 +27,9 @@ def generate_context(
     sections: list[str] = []
 
     if include_workset:
-        workset = _build_workset(repo_path, slug, max_file_lines)
+        # Only inline full source when --full is requested
+        workset = _build_workset(repo_path, slug, max_file_lines,
+                                 inline_source=include_related)
         if workset:
             sections.append(workset)
 
@@ -43,7 +45,8 @@ def generate_context(
     return "\n---\n\n".join(sections)
 
 
-def _build_workset(repo_path: str, slug: str, max_lines: int) -> str:
+def _build_workset(repo_path: str, slug: str, max_lines: int,
+                   inline_source: bool = False) -> str:
     git_state = get_git_state(repo_path)
     intent = infer_intent(repo_path, git_state)
 
@@ -65,12 +68,14 @@ def _build_workset(repo_path: str, slug: str, max_lines: int) -> str:
 
             card = load_card(slug, rel_path)
             if card:
-                lines.append(f"*{card.purpose}*\n")
+                lines.append(f"*{card.purpose}*")
 
-            if abs_path.is_file():
+            if inline_source and abs_path.is_file():
+                # --full mode: inline the actual source
                 try:
                     content = abs_path.read_text(errors="replace")
                     file_lines = content.splitlines()
+                    lines.append("")
                     if len(file_lines) <= max_lines:
                         lines.append(f"```{_ext_lang(abs_path)}")
                         lines.append(content)
@@ -78,10 +83,20 @@ def _build_workset(repo_path: str, slug: str, max_lines: int) -> str:
                     else:
                         lines.append(f"```{_ext_lang(abs_path)}")
                         lines.append("\n".join(file_lines[:max_lines]))
-                        lines.append(f"```")
+                        lines.append("```")
                         lines.append(f"*... truncated ({len(file_lines)} lines total)*\n")
                 except (OSError, PermissionError):
                     lines.append("*unreadable*\n")
+            elif card:
+                # Default mode: show the card instead of full source
+                lines.append("")
+                if card.functions:
+                    lines.append("Functions: " + ", ".join(card.functions[:8]))
+                if card.classes:
+                    lines.append("Classes: " + ", ".join(card.classes[:5]))
+                if card.imports:
+                    lines.append("Imports: " + ", ".join(card.imports[:6]))
+                lines.append("")
 
     if git_state.recent_files:
         recent_only = [
