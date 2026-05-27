@@ -34,10 +34,47 @@ _NOISE_WORDS = {
 # Patterns that identify test files across languages
 _TEST_FILE_PATTERNS = ("_test.go", "_test.py", "test_", "_spec.", ".spec.", ".test.")
 
+# Files most likely to define the package's public API
+_ENTRY_STEMS = {
+    "__init__", "index", "main", "lib", "mod",
+}
+_CORE_STEMS = {
+    "core", "base", "app", "engine", "types", "type",
+    "model", "models", "client", "server", "api",
+    "router", "context", "handler", "config",
+}
+_UTIL_STEMS = {
+    "util", "utils", "helper", "helpers", "compat",
+    "internal", "common", "misc", "tools", "version",
+}
+_ERROR_STEMS = {
+    "error", "errors", "exception", "exceptions",
+}
+
 
 def _is_test_file(rel_path: str) -> bool:
     name = Path(rel_path).name
     return any(p in name for p in _TEST_FILE_PATTERNS)
+
+
+def _card_file_priority(rel_path: str, dir_name: str = "") -> int:
+    """Lower = more likely to contain core API symbols."""
+    stem = Path(rel_path).stem.lower()
+    # File matches its containing directory (e.g. gin.go in gin/)
+    if dir_name and stem == dir_name.lower().rstrip("s"):
+        return 0
+    if stem in _ENTRY_STEMS:
+        return 0
+    if stem in _CORE_STEMS:
+        return 1
+    if stem in _ERROR_STEMS:
+        return 4
+    if stem in _UTIL_STEMS:
+        return 3
+    # Internal modules: _compat.py, _utils.py
+    if Path(rel_path).name.startswith("_") and stem.lstrip("_") not in _ENTRY_STEMS:
+        return 3
+    return 2
 
 
 def generate_tree(slug: str, repo_path: str) -> str:
@@ -171,14 +208,17 @@ _NOISE_SUFFIXES = ("Warning", "Error", "Exception", "Mixin")
 def _symbol_rank(name: str) -> int:
     """Lower rank = more likely to be public API. Used for sorting."""
     bare = name.split("(")[0].strip()
+    paren = name[len(bare):] if "(" in name else ""
     # Noise suffixes (warnings, errors, mixins) -- least interesting
     if bare.endswith(_NOISE_SUFFIXES):
-        return 4
+        return 5
     # Underscore-prefixed -- private/internal
     if bare.startswith("_"):
+        return 4
+    # Exception subclasses: BadParameter(UsageError), HTTPError(Exception)
+    if paren and any(x in paren for x in ("Error", "Exception")):
         return 3
     # Go unexported: lowercase initial letter, no underscore
-    # (also catches some C/Rust internal names, which is fine)
     if bare[0:1].islower():
         return 2
     # Test-prefixed functions
@@ -222,9 +262,10 @@ def _dir_summary(cards: list[Card], dir_name: str = "") -> str:
     all_exports: list[str] = []
     all_functions: list[str] = []
 
-    # Process source files before test files so real API surfaces first
+    # Sort: entry/core files first, test/error/util files last
     src_cards = [c for c in cards if not _is_test_file(c.rel_path)]
     test_cards = [c for c in cards if _is_test_file(c.rel_path)]
+    src_cards.sort(key=lambda c: _card_file_priority(c.rel_path, dir_name))
     for c in src_cards + test_cards:
         all_classes.extend(c.classes[:3])
         all_exports.extend(c.exports[:3])
