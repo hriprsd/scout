@@ -98,6 +98,110 @@ def _card_file_priority(rel_path: str, dir_name: str = "") -> int:
     return 2
 
 
+def _collapse_depth2_children(
+    child_keys: list[str],
+    group_name: str,
+) -> list[str]:
+    """Collapse homogeneous depth-2 siblings into one line.
+
+    Detects numbered patterns (problem_001, problem_002, ...) and
+    prefix-based repetition. Returns a list of child_keys with
+    collapsed groups replaced by pre-formatted "[COLLAPSED]..." entries.
+    """
+    if len(child_keys) <= 8:
+        return child_keys
+
+    # Extract the child name portion and find common prefixes
+    prefix_groups: dict[str, list[str]] = defaultdict(list)
+    for k in child_keys:
+        name = Path(k).name
+        # Strip trailing digits/underscores to find prefix
+        prefix = re.sub(r"[\d_]+$", "", name)
+        if prefix and prefix != name:
+            prefix_groups[prefix].append(k)
+
+    result: list[str] = []
+    consumed: set[str] = set()
+    for prefix, members in prefix_groups.items():
+        if len(members) < 5:
+            continue
+        consumed.update(members)
+        total = len(members)
+        result.append(
+            f"[COLLAPSED]  {prefix}*/ ({total} dirs)"
+        )
+
+    # Add non-consumed children normally
+    for k in child_keys:
+        if k not in consumed:
+            result.append(k)
+
+    return result
+
+
+def _collapse_sibling_groups(
+    groups: dict[str, list[str]],
+    cards_by_dir: dict[str, list[Card]],
+) -> dict[str, list[str]]:
+    """Merge groups that share a prefix into one collapsed entry.
+
+    Detects patterns like pages.ar/, pages.bg/, ... and merges them
+    into a single pages.{ar,bg,...}/ group. Triggers when 5+ groups
+    share the same prefix (split on '.', '-', '_').
+    """
+    # Find prefixes shared by many groups
+    prefix_members: dict[str, list[str]] = defaultdict(list)
+    for name in groups:
+        if name == "(root)":
+            continue
+        # Try splitting on common delimiters
+        for sep in (".", "-", "_"):
+            if sep in name:
+                prefix = name.split(sep, 1)[0]
+                prefix_members[f"{prefix}{sep}"].append(name)
+                break
+
+    result = dict(groups)
+    for prefix, members in prefix_members.items():
+        if len(members) < 5:
+            continue
+        # Only collapse if members have similar internal structure.
+        # Compare depth-2 child dir names across members.
+        child_sets = []
+        for m in members:
+            children = set()
+            for d in groups[m]:
+                parts = Path(d).parts
+                if len(parts) >= 2:
+                    children.add(parts[1])
+            child_sets.append(children)
+        # Check structural similarity: >50% of members share the same
+        # child dir names (e.g. all have common/, linux/, osx/)
+        if child_sets:
+            reference = child_sets[0]
+            similar = sum(
+                1 for cs in child_sets[1:]
+                if reference and cs and len(cs & reference) / max(len(reference), 1) > 0.5
+            )
+            if similar < len(members) * 0.5:
+                continue  # structurally diverse, don't collapse
+
+        merged_dirs: list[str] = []
+        suffixes = []
+        for m in sorted(members):
+            merged_dirs.extend(groups[m])
+            suffix = m[len(prefix):]
+            suffixes.append(suffix)
+            del result[m]
+        shown = sorted(suffixes)[:6]
+        suffix_str = ",".join(shown)
+        if len(suffixes) > 6:
+            suffix_str += f",+{len(suffixes) - 6}"
+        collapsed_name = f"{prefix}{{{suffix_str}}}"
+        result[collapsed_name] = merged_dirs
+    return result
+
+
 def generate_tree(slug: str, repo_path: str) -> str:
     cdir = cards_dir(slug)
     if not cdir.exists():
@@ -136,6 +240,10 @@ def generate_tree(slug: str, repo_path: str) -> str:
             top = Path(dir_path).parts[0]
             groups[top].append(dir_path)
 
+    # Collapse homogeneous sibling groups that share a prefix
+    # (e.g. pages.ar/, pages.bg/, ... → pages.{ar,bg,...}/)
+    groups = _collapse_sibling_groups(groups, cards_by_dir)
+
     for group_name in sorted(groups.keys()):
         dir_paths = groups[group_name]
 
@@ -155,6 +263,10 @@ def generate_tree(slug: str, repo_path: str) -> str:
 
         # Collapsed dirs: single line, no children
         lower = group_name.lower()
+        # Synthetic collapsed groups from sibling merging
+        if "{" in group_name:
+            lines.append(f"{group_name}/ ({total_files} files, {total_lines} lines)")
+            continue
         if lower in _COLLAPSED_DIRS or _is_test_dir(group_name):
             lines.append(f"{group_name}/ ({total_files} files, {total_lines} lines)")
             continue
@@ -241,22 +353,36 @@ def generate_tree(slug: str, repo_path: str) -> str:
                     lines.append(f"  {sub}/ ({len(sub_cards)} files){sub_detail}")
             continue
 
-        for child_key in sorted(depth2.keys()):
-            if child_key == group_name:
+        # Detect homogeneous depth-2 children (problem_001..problem_800)
+        child_keys = [k for k in sorted(depth2.keys()) if k != group_name]
+        if non_structural:
+            child_keys = [
+                k for k in child_keys
+                if Path(k).name.lower() not in _STRUCTURAL or not non_structural
+            ]
+        collapsed_children = _collapse_depth2_children(child_keys, group_name)
+
+        for child_entry in collapsed_children:
+            if child_entry.startswith("[COLLAPSED]"):
+                # Pre-formatted collapsed line
+                lines.append(child_entry.removeprefix("[COLLAPSED]"))
                 continue
-            # Skip structural dirs when non-structural siblings exist
-            if Path(child_key).name.lower() in _STRUCTURAL and non_structural:
-                continue
+            child_key = child_entry
             child_cards = depth2[child_key]
             child_name = str(Path(child_key).relative_to(group_name))
             sub_packages = depth3_names.get(child_key, set())
+            # Filter out structural and test dirs from sub-package names
+            visible_pkgs = {
+                s for s in sub_packages
+                if s.lower() not in _SKIP_SUBS and not _is_test_dir(s)
+            }
             # If many sub-packages folded in, show their names
             # instead of symbols from one arbitrary sub-package
-            if len(sub_packages) > 3:
-                names = sorted(sub_packages)[:8]
+            if len(visible_pkgs) > 3:
+                names = sorted(visible_pkgs)[:8]
                 names_str = ", ".join(names)
-                if len(sub_packages) > 8:
-                    names_str += f", +{len(sub_packages) - 8} more"
+                if len(visible_pkgs) > 8:
+                    names_str += f", +{len(visible_pkgs) - 8} more"
                 lines.append(
                     f"  {child_name}/ ({len(child_cards)} files)"
                     f" [{names_str}]"
