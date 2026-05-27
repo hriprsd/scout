@@ -21,6 +21,9 @@ _COLLAPSED_DIRS = {
     "vendor", "third_party",
 }
 
+# Substrings that mark a top-level dir as test infrastructure
+_TEST_DIR_MARKERS = {"test", "testing", "mock", "fake", "stub", "fixture", "sample"}
+
 # Words that add no signal in summaries
 _NOISE_WORDS = {
     "terraform", "python", "javascript", "typescript", "go", "rust",
@@ -55,6 +58,12 @@ _ERROR_STEMS = {
 def _is_test_file(rel_path: str) -> bool:
     name = Path(rel_path).name
     return any(p in name for p in _TEST_FILE_PATTERNS)
+
+
+def _is_test_dir(name: str) -> bool:
+    """Check if a directory name indicates test infrastructure."""
+    parts = {p.rstrip("s") for p in name.replace("-", "_").split("_")}
+    return bool(parts & _TEST_DIR_MARKERS)
 
 
 def _card_file_priority(rel_path: str, dir_name: str = "") -> int:
@@ -133,7 +142,8 @@ def generate_tree(slug: str, repo_path: str) -> str:
         )
 
         # Collapsed dirs: single line, no children
-        if group_name.lower() in _COLLAPSED_DIRS:
+        lower = group_name.lower()
+        if lower in _COLLAPSED_DIRS or _is_test_dir(lower):
             lines.append(f"{group_name}/ ({total_files} files, {total_lines} lines)")
             continue
 
@@ -166,8 +176,50 @@ def generate_tree(slug: str, repo_path: str) -> str:
                 key = d
             depth2[key].extend(cards_by_dir[d])
 
+        # Skip structural-only dirs (src/, lib/, pkg/) that just
+        # mirror the parent. Fold their symbols into the group header.
+        _STRUCTURAL = {"src", "lib", "pkg", "main"}
+        non_structural = {
+            k for k in depth2
+            if k != group_name
+            and Path(k).name.lower() not in _STRUCTURAL
+        }
+        structural = {
+            k for k in depth2
+            if k != group_name
+            and Path(k).name.lower() in _STRUCTURAL
+        }
+        # If ONLY structural children, promote their content
+        if structural and not non_structural:
+            all_struct_cards = []
+            for sk in structural:
+                all_struct_cards.extend(depth2[sk])
+            if all_struct_cards and not summary:
+                summary = _dir_summary(all_struct_cards, dir_name=group_name)
+                detail = f" - {summary}" if summary else ""
+                lines[-1] = f"{group_name}/ ({total_files} files, {total_lines} lines){detail}"
+            # Show depth-3 sub-packages of the structural dirs
+            for sk in sorted(structural):
+                sk_subs = depth3_names.get(sk, set())
+                if sk_subs:
+                    for sub in sorted(sk_subs):
+                        sub_key_prefix = str(Path(sk) / sub)
+                        sub_cards = [
+                            c for d in dir_paths
+                            if d.startswith(sub_key_prefix)
+                            for c in cards_by_dir[d]
+                        ]
+                        if sub_cards:
+                            sub_summary = _dir_summary(sub_cards, dir_name=sub)
+                            sub_detail = f" - {sub_summary}" if sub_summary else ""
+                            lines.append(f"  {sub}/ ({len(sub_cards)} files){sub_detail}")
+            continue
+
         for child_key in sorted(depth2.keys()):
             if child_key == group_name:
+                continue
+            # Skip structural dirs when non-structural siblings exist
+            if Path(child_key).name.lower() in _STRUCTURAL and non_structural:
                 continue
             child_cards = depth2[child_key]
             child_name = str(Path(child_key).relative_to(group_name))
