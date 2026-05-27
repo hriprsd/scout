@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from collections import defaultdict
 from pathlib import Path
 
@@ -62,8 +63,19 @@ def _is_test_file(rel_path: str) -> bool:
 
 def _is_test_dir(name: str) -> bool:
     """Check if a directory name indicates test infrastructure."""
-    parts = {p.rstrip("s") for p in name.replace("-", "_").split("_")}
+    # Split on -, _, and camelCase boundaries (split BEFORE lowercasing)
+    expanded = re.sub(r"([a-z])([A-Z])", r"\1_\2", name)
+    parts = {p.rstrip("s").lower() for p in expanded.replace("-", "_").split("_")}
     return bool(parts & _TEST_DIR_MARKERS)
+
+
+def _has_test_ancestor(rel_path: str) -> bool:
+    """Check if any path component is a test directory."""
+    _TEST_PARTS = {"test", "tests", "spec", "specs", "__tests__"}
+    for part in Path(rel_path).parts[:-1]:  # skip filename
+        if part.lower() in _TEST_PARTS or _is_test_dir(part):
+            return True
+    return _is_test_file(rel_path)
 
 
 def _card_file_priority(rel_path: str, dir_name: str = "") -> int:
@@ -143,7 +155,7 @@ def generate_tree(slug: str, repo_path: str) -> str:
 
         # Collapsed dirs: single line, no children
         lower = group_name.lower()
-        if lower in _COLLAPSED_DIRS or _is_test_dir(lower):
+        if lower in _COLLAPSED_DIRS or _is_test_dir(group_name):
             lines.append(f"{group_name}/ ({total_files} files, {total_lines} lines)")
             continue
 
@@ -155,10 +167,17 @@ def generate_tree(slug: str, repo_path: str) -> str:
             lines.append(f"{group_name}/ ({len(cards)} files, {total_lines} lines){detail}")
             continue
 
-        # Group with subdirs: header uses only root-level cards
-        # (not children) to avoid bubbling up child symbols
+        # Group with subdirs: prefer root-level cards for header,
+        # but fall back to all cards if root only has functions
+        # (catches Ruby/Go where init file has methods, not classes)
         root_cards = cards_by_dir.get(group_name, [])
         summary = _dir_summary(root_cards, dir_name=group_name)
+        if summary and not any(c.classes for c in root_cards):
+            # Root summary is function-only; check if children have classes
+            all_group_cards = [c for d in dir_paths for c in cards_by_dir[d]]
+            class_summary = _dir_summary(all_group_cards, dir_name=group_name)
+            if class_summary != summary:
+                summary = class_summary
         detail = f" - {summary}" if summary else ""
         lines.append(f"{group_name}/ ({total_files} files, {total_lines} lines){detail}")
 
@@ -176,9 +195,10 @@ def generate_tree(slug: str, repo_path: str) -> str:
                 key = d
             depth2[key].extend(cards_by_dir[d])
 
-        # Skip structural-only dirs (src/, lib/, pkg/) that just
-        # mirror the parent. Fold their symbols into the group header.
+        # Structural dirs (src/, lib/, pkg/, main/) just mirror
+        # the parent. Fold their content into the group header.
         _STRUCTURAL = {"src", "lib", "pkg", "main"}
+        _SKIP_SUBS = _STRUCTURAL | {"test", "tests"}
         non_structural = {
             k for k in depth2
             if k != group_name
@@ -189,30 +209,36 @@ def generate_tree(slug: str, repo_path: str) -> str:
             if k != group_name
             and Path(k).name.lower() in _STRUCTURAL
         }
-        # If ONLY structural children, promote their content
         if structural and not non_structural:
-            all_struct_cards = []
-            for sk in structural:
-                all_struct_cards.extend(depth2[sk])
-            if all_struct_cards and not summary:
-                summary = _dir_summary(all_struct_cards, dir_name=group_name)
+            # Collect source-only cards (skip test paths)
+            src_cards_list = [
+                c for sk in structural for c in depth2[sk]
+                if not _has_test_ancestor(c.rel_path)
+            ]
+            if src_cards_list and not summary:
+                summary = _dir_summary(src_cards_list, dir_name=group_name)
                 detail = f" - {summary}" if summary else ""
                 lines[-1] = f"{group_name}/ ({total_files} files, {total_lines} lines){detail}"
-            # Show depth-3 sub-packages of the structural dirs
+            # Promote depth-3 children, skipping structural and test dirs
+            visible_subs: list[tuple[str, str, list[Card]]] = []
             for sk in sorted(structural):
-                sk_subs = depth3_names.get(sk, set())
-                if sk_subs:
-                    for sub in sorted(sk_subs):
-                        sub_key_prefix = str(Path(sk) / sub)
-                        sub_cards = [
-                            c for d in dir_paths
-                            if d.startswith(sub_key_prefix)
-                            for c in cards_by_dir[d]
-                        ]
-                        if sub_cards:
-                            sub_summary = _dir_summary(sub_cards, dir_name=sub)
-                            sub_detail = f" - {sub_summary}" if sub_summary else ""
-                            lines.append(f"  {sub}/ ({len(sub_cards)} files){sub_detail}")
+                for sub in sorted(depth3_names.get(sk, set())):
+                    if sub.lower() in _SKIP_SUBS or _is_test_dir(sub):
+                        continue
+                    sub_prefix = str(Path(sk) / sub)
+                    sub_cards = [
+                        c for d in dir_paths
+                        if d.startswith(sub_prefix)
+                        for c in cards_by_dir[d]
+                    ]
+                    if sub_cards:
+                        visible_subs.append((sub, sub_prefix, sub_cards))
+            # Only show sub-lines if there's real variety
+            if len(visible_subs) > 1:
+                for sub, _, sub_cards in visible_subs:
+                    sub_summary = _dir_summary(sub_cards, dir_name=sub)
+                    sub_detail = f" - {sub_summary}" if sub_summary else ""
+                    lines.append(f"  {sub}/ ({len(sub_cards)} files){sub_detail}")
             continue
 
         for child_key in sorted(depth2.keys()):
