@@ -10,7 +10,7 @@ from pathlib import Path
 from scout.card import Card, load_card
 from scout.config import cards_dir
 
-# Top-level dirs that get a single collapsed line (no subdirs listed)
+# Top-level dirs that get a single collapsed line
 _COLLAPSED_DIRS = {
     "test", "tests", "spec", "specs", "__tests__",
     "docs", "doc", "documentation",
@@ -21,12 +21,14 @@ _COLLAPSED_DIRS = {
     "vendor", "third_party",
 }
 
-# Summary words that are noise (language names, obvious labels)
+# Words that add no signal in summaries
 _NOISE_WORDS = {
     "terraform", "python", "javascript", "typescript", "go", "rust",
     "java", "ruby", "shell", "yaml", "toml", "json", "markdown",
     "html", "css", "c", "cpp", "sql", "configuration", "module",
-    "application",
+    "application", "service", "provide", "contain", "entry", "point",
+    "for", "the", "and", "with", "from", "main", "init", "helper",
+    "util", "utilitie", "implement", "definition", "file",
 }
 
 
@@ -59,7 +61,7 @@ def generate_tree(slug: str, repo_path: str) -> str:
             lines.append(f"Entry: {ep}")
         lines.append("")
 
-    # Group all dirs by their top-level parent
+    # Group dirs by top-level parent
     groups: dict[str, list[str]] = defaultdict(list)
     for dir_path in sorted(cards_by_dir.keys()):
         if dir_path == "(root)":
@@ -68,10 +70,10 @@ def generate_tree(slug: str, repo_path: str) -> str:
             top = Path(dir_path).parts[0]
             groups[top].append(dir_path)
 
-    # Render each group
     for group_name in sorted(groups.keys()):
         dir_paths = groups[group_name]
 
+        # Root files
         if group_name == "(root)":
             cards = cards_by_dir["(root)"]
             summary = _dir_summary(cards)
@@ -79,106 +81,92 @@ def generate_tree(slug: str, repo_path: str) -> str:
             lines.append(f"./ ({len(cards)} files){detail}")
             continue
 
-        # Aggregate stats for the whole group
+        # Aggregate stats
         total_files = sum(len(cards_by_dir[d]) for d in dir_paths)
         total_lines = sum(
             sum(c.lines for c in cards_by_dir[d]) for d in dir_paths
         )
 
-        # Collapsed dirs or groups with many subdirs: single line
-        if (group_name.lower() in _COLLAPSED_DIRS
-                or len(dir_paths) > 6):
-            sub_count = len(dir_paths) - (1 if group_name in dir_paths else 0)
-            sub_note = f", {sub_count} subdirs" if sub_count > 0 else ""
-            # For large groups, list the subdir names compactly
-            if len(dir_paths) > 6 and group_name.lower() not in _COLLAPSED_DIRS:
-                child_names = []
-                for d in dir_paths:
-                    parts = Path(d).parts
-                    if len(parts) == 2:
-                        child_names.append(parts[1])
-                if child_names:
-                    names_str = ", ".join(child_names[:12])
-                    if len(child_names) > 12:
-                        names_str += f", +{len(child_names) - 12} more"
-                    lines.append(
-                        f"{group_name}/ ({total_files} files, "
-                        f"{total_lines} lines{sub_note})"
-                    )
-                    lines.append(f"  [{names_str}]")
-                else:
-                    lines.append(
-                        f"{group_name}/ ({total_files} files, "
-                        f"{total_lines} lines{sub_note})"
-                    )
-            else:
-                lines.append(
-                    f"{group_name}/ ({total_files} files, "
-                    f"{total_lines} lines{sub_note})"
-                )
+        # Collapsed dirs: single line, no children
+        if group_name.lower() in _COLLAPSED_DIRS:
+            lines.append(f"{group_name}/ ({total_files} files, {total_lines} lines)")
             continue
 
-        # Small group (1-6 subdirs): show top-level with summary,
-        # then subdirs indented
-        if len(dir_paths) == 1:
-            d = dir_paths[0]
-            cards = cards_by_dir[d]
-            summary = _dir_summary(cards)
+        # Single directory, no subdirs
+        if len(dir_paths) == 1 and dir_paths[0] == group_name:
+            cards = cards_by_dir[group_name]
+            summary = _dir_summary(cards, dir_name=group_name)
             detail = f" - {summary}" if summary else ""
-            lines.append(
-                f"{d}/ ({len(cards)} files, "
-                f"{sum(c.lines for c in cards)} lines){detail}"
-            )
-        else:
-            # Group header
-            all_cards = []
-            for d in dir_paths:
-                all_cards.extend(cards_by_dir[d])
-            summary = _dir_summary(all_cards)
-            detail = f" - {summary}" if summary else ""
-            lines.append(
-                f"{group_name}/ ({total_files} files, "
-                f"{total_lines} lines){detail}"
-            )
-            # Subdirs as indented lines
-            for d in dir_paths:
-                if d == group_name:
-                    continue
-                cards = cards_by_dir[d]
-                # Show relative path from group
-                rel = str(Path(d).relative_to(group_name))
-                sub_summary = _dir_summary(cards)
-                sub_detail = f" - {sub_summary}" if sub_summary else ""
-                lines.append(
-                    f"  {rel}/ ({len(cards)} files){sub_detail}"
-                )
+            lines.append(f"{group_name}/ ({len(cards)} files, {total_lines} lines){detail}")
+            continue
+
+        # Group with subdirs: header + indented children
+        all_cards = []
+        for d in dir_paths:
+            all_cards.extend(cards_by_dir[d])
+        summary = _dir_summary(all_cards, dir_name=group_name)
+        detail = f" - {summary}" if summary else ""
+        lines.append(f"{group_name}/ ({total_files} files, {total_lines} lines){detail}")
+
+        # Show depth-2 directories as indented lines.
+        # Deeper dirs get folded into their depth-2 parent.
+        depth2: dict[str, list[Card]] = defaultdict(list)
+        for d in dir_paths:
+            parts = Path(d).parts
+            if len(parts) >= 2:
+                key = str(Path(parts[0]) / parts[1])
+            else:
+                key = d
+            depth2[key].extend(cards_by_dir[d])
+
+        for child_key in sorted(depth2.keys()):
+            if child_key == group_name:
+                continue
+            child_cards = depth2[child_key]
+            child_name = str(Path(child_key).relative_to(group_name))
+            child_summary = _dir_summary(child_cards, dir_name=child_name)
+            child_detail = f" - {child_summary}" if child_summary else ""
+            lines.append(f"  {child_name}/ ({len(child_cards)} files){child_detail}")
 
     return "\n".join(lines)
 
 
-def _dir_summary(cards: list[Card]) -> str:
+def _dir_summary(cards: list[Card], dir_name: str = "") -> str:
     """Build a concise summary from cards, filtering noise."""
+    # Words from the directory name itself are redundant
+    dir_words = set()
+    if dir_name:
+        for part in dir_name.replace("-", "_").split("_"):
+            part = part.lower().rstrip("s").strip()
+            if part:
+                dir_words.add(part)
+
     all_classes = []
     all_exports = []
+    all_functions = []
     for c in cards:
         all_classes.extend(c.classes[:2])
         all_exports.extend(c.exports[:3])
+        all_functions.extend(c.functions[:2])
 
-    # Prefer classes, then exports
-    symbols = all_classes[:3] if all_classes else all_exports[:4]
-    if symbols:
-        return ", ".join(symbols)
+    # Prefer classes, then exports, then top functions
+    if all_classes:
+        return ", ".join(all_classes[:3])
+    if all_exports:
+        return ", ".join(all_exports[:4])
+    if all_functions:
+        names = []
+        for f in all_functions[:4]:
+            name = f.split("(")[0].strip()
+            if name:
+                names.append(name)
+        if names:
+            return ", ".join(names)
 
-    # Fall back to purpose keywords, filtering noise
-    purposes = set()
-    for c in cards:
-        if c.purpose:
-            for word in c.purpose.lower().split():
-                word = word.rstrip("s").strip()
-                if word and word not in _NOISE_WORDS and len(word) > 2:
-                    purposes.add(word)
-    filtered = sorted(purposes)[:3]
-    return ", ".join(filtered) if filtered else ""
+    # No structural symbols found. Don't fall back to purpose keywords
+    # because they're usually noise ("Application entry point for X").
+    # The directory name and file count are enough.
+    return ""
 
 
 def _find_entry_points(repo_path: str) -> list[str]:
