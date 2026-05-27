@@ -20,6 +20,9 @@ _COLLAPSED_DIRS = {
     "fixtures", "testdata", "test_data",
     "static", "public", "assets",
     "vendor", "third_party",
+    "bench", "benchmark", "benchmarks",
+    "scripts", "script", "tools", "hack",
+    "changelogs", "changelog",
 }
 
 # Substrings that mark a top-level dir as test infrastructure
@@ -69,11 +72,18 @@ def _is_test_dir(name: str) -> bool:
     return bool(parts & _TEST_DIR_MARKERS)
 
 
+_LOW_SIGNAL_PARTS = {
+    "test", "tests", "spec", "specs", "__tests__",
+    "examples", "example", "bench", "benchmarks", "benchmark",
+    "fixtures", "testdata", "test_data", "testcases",
+    "snapshots", "__snapshots__",
+}
+
+
 def _has_test_ancestor(rel_path: str) -> bool:
-    """Check if any path component is a test directory."""
-    _TEST_PARTS = {"test", "tests", "spec", "specs", "__tests__"}
+    """Check if any path component is a test/example/bench directory."""
     for part in Path(rel_path).parts[:-1]:  # skip filename
-        if part.lower() in _TEST_PARTS or _is_test_dir(part):
+        if part.lower() in _LOW_SIGNAL_PARTS or _is_test_dir(part):
             return True
     return _is_test_file(rel_path)
 
@@ -362,6 +372,15 @@ def generate_tree(slug: str, repo_path: str) -> str:
             ]
         collapsed_children = _collapse_depth2_children(child_keys, group_name)
 
+        # Track symbols across siblings to dedupe codegen scaffolding
+        sibling_symbol_count: dict[str, int] = defaultdict(int)
+        for ck in child_keys:
+            for c in depth2.get(ck, []):
+                for cls in c.classes[:2]:
+                    sibling_symbol_count[cls.split("(")[0].strip()] += 1
+        # Symbols appearing in 5+ siblings are likely auto-generated
+        codegen_symbols = {s for s, n in sibling_symbol_count.items() if n >= 5}
+
         for child_entry in collapsed_children:
             if child_entry.startswith("[COLLAPSED]"):
                 # Pre-formatted collapsed line
@@ -398,11 +417,13 @@ def generate_tree(slug: str, repo_path: str) -> str:
                         for c in cards_by_dir[d]
                     ]
                     if pkg_cards:
-                        pkg_summary = _dir_summary(pkg_cards, dir_name=pkg)
+                        pkg_summary = _dir_summary(pkg_cards, dir_name=pkg,
+                                                    exclude=codegen_symbols)
                         pkg_detail = f" - {pkg_summary}" if pkg_summary else ""
                         lines.append(f"    {pkg}/ ({len(pkg_cards)} files){pkg_detail}")
             else:
-                child_summary = _dir_summary(child_cards, dir_name=child_name)
+                child_summary = _dir_summary(child_cards, dir_name=child_name,
+                                              exclude=codegen_symbols)
                 child_detail = f" - {child_summary}" if child_summary else ""
                 lines.append(f"  {child_name}/ ({len(child_cards)} files){child_detail}")
 
@@ -422,11 +443,26 @@ def _dedup(items: list[str]) -> list[str]:
 
 _NOISE_SUFFIXES = ("Warning", "Error", "Exception", "Mixin")
 
+# Test fixture / placeholder names that add zero signal
+_FIXTURE_NAMES = {
+    "foo", "bar", "baz", "qux", "quux", "corge", "grault",
+    "myclass", "mytest", "myapp", "mymodule", "mytype",
+    "someclass", "sometype", "example", "sample", "demo",
+    "testclass", "testtype", "testcase",
+    "main",  # every binary has one, not distinctive
+}
+
 
 def _symbol_rank(name: str) -> int:
     """Lower rank = more likely to be public API. Used for sorting."""
     bare = name.split("(")[0].strip()
     paren = name[len(bare):] if "(" in name else ""
+    # Single-letter names (X, F, I, C, U) -- test placeholders
+    if len(bare) <= 2 and bare.isalpha():
+        return 6
+    # Known fixture/placeholder names
+    if bare.lower().rstrip("0123456789") in _FIXTURE_NAMES:
+        return 6
     # Noise suffixes (warnings, errors, mixins) -- least interesting
     if bare.endswith(_NOISE_SUFFIXES):
         return 5
@@ -469,7 +505,8 @@ def _rank_functions(items: list[str]) -> list[str]:
     return unique
 
 
-def _dir_summary(cards: list[Card], dir_name: str = "") -> str:
+def _dir_summary(cards: list[Card], dir_name: str = "",
+                  exclude: set[str] | None = None) -> str:
     """Build a concise summary from cards, filtering noise."""
     # Words from the directory name itself are redundant
     dir_words = set()
@@ -483,11 +520,12 @@ def _dir_summary(cards: list[Card], dir_name: str = "") -> str:
     all_exports: list[str] = []
     all_functions: list[str] = []
 
-    # Sort: entry/core files first, test/error/util files last
-    src_cards = [c for c in cards if not _is_test_file(c.rel_path)]
-    test_cards = [c for c in cards if _is_test_file(c.rel_path)]
+    # Collect from source files only. Test/example/fixture symbols
+    # are omitted entirely -- they contain placeholders (Foo, X, etc.)
+    # that displace real API types.
+    src_cards = [c for c in cards if not _has_test_ancestor(c.rel_path)]
     src_cards.sort(key=lambda c: _card_file_priority(c.rel_path, dir_name))
-    for c in src_cards + test_cards:
+    for c in src_cards:
         all_classes.extend(c.classes[:3])
         all_exports.extend(c.exports[:3])
         all_functions.extend(c.functions[:4])
@@ -495,6 +533,13 @@ def _dir_summary(cards: list[Card], dir_name: str = "") -> str:
     all_classes = _rank_symbols(all_classes)
     all_exports = _dedup(all_exports)
     all_functions = _rank_functions(all_functions)
+
+    # Filter out codegen/duplicate symbols from parent
+    if exclude:
+        all_classes = [c for c in all_classes
+                       if c.split("(")[0].strip() not in exclude]
+        all_exports = [e for e in all_exports if e not in exclude]
+        all_functions = [f for f in all_functions if f not in exclude]
 
     # Prefer classes, then exports, then top functions
     if all_classes:

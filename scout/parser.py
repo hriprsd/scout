@@ -42,6 +42,16 @@ LANGUAGE_MAP: dict[str, str] = {
     ".erl": "erlang",
     ".clj": "clojure",
     ".dart": "dart",
+    ".el": "elisp",
+    ".nim": "nim",
+    ".v": "vlang",
+    ".ml": "ocaml", ".mli": "ocaml",
+    ".hs": "haskell",
+    ".fs": "fsharp", ".fsx": "fsharp",
+    ".cr": "crystal",
+    ".pp": "puppet",
+    ".proto": "protobuf",
+    ".graphql": "graphql", ".gql": "graphql",
 }
 
 
@@ -361,19 +371,50 @@ def _parse_elixir(lines: list[str], r: ParseResult) -> None:
             r.imports.append(stripped)
 
 
+def _parse_elisp(lines: list[str], r: ParseResult) -> None:
+    """Parser for Emacs Lisp / Clojure. Extracts defun, defvar, defmacro etc."""
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith(";"):
+            continue  # skip comments
+        # (defun name (...) ...) / (defmacro name ...)
+        m = re.match(r"^\(def(?:un|macro|subst|advice)\s+([\w-]+)", stripped)
+        if m:
+            r.functions.append(m.group(1))
+            continue
+        # (defvar name ...) / (defcustom name ...) / (defconst name ...)
+        m = re.match(r"^\(def(?:var|custom|const|face|group)\s+([\w-]+)", stripped)
+        if m:
+            r.exports.append(m.group(1))
+            continue
+        # (provide 'name)
+        m = re.match(r"^\(provide\s+'([\w-]+)", stripped)
+        if m:
+            r.exports.insert(0, m.group(1))
+            continue
+        # (require 'name)
+        m = re.match(r"^\(require\s+'([\w-]+)", stripped)
+        if m:
+            r.imports.append(m.group(1))
+
+
 def _parse_generic(lines: list[str], r: ParseResult) -> None:
     for line in lines:
         stripped = line.strip()
         if re.match(r"^(import|require|use|include|from)\s", stripped):
             r.imports.append(stripped.split("#")[0].split("//")[0].strip().rstrip(";"))
-        elif re.match(r"^(def|fn|func|function|sub)\s+(\w+)", stripped):
-            m = re.match(r"^(def|fn|func|function|sub)\s+(\w+)\s*(\([^)]*\))?", stripped)
+        elif re.match(r"^(?:pub\s+)?(?:export\s+)?(def|fn|func|function|sub)\s+(\w+)", stripped):
+            m = re.match(r"^(?:pub\s+)?(?:export\s+)?(def|fn|func|function|sub)\s+(\w+)\s*(\([^)]*\))?", stripped)
             if m:
                 r.functions.append(f"{m.group(2)}{_truncate_params(m.group(3) or '()')}")
-        elif re.match(r"^(class|struct|enum|interface|type|trait|module)\s+(\w+)", stripped):
-            m = re.match(r"^(class|struct|enum|interface|type|trait|module)\s+(\w+)", stripped)
+        elif re.match(r"^(?:pub\s+)?(?:export\s+)?(class|struct|enum|interface|type|trait|module)\s+(\w+)", stripped):
+            m = re.match(r"^(?:pub\s+)?(?:export\s+)?(class|struct|enum|interface|type|trait|module)\s+(\w+)", stripped)
             if m:
                 r.classes.append(f"{m.group(1)} {m.group(2)}")
+        elif re.match(r"^pub\s+const\s+(\w+)\s*=", stripped):
+            m = re.match(r"^pub\s+const\s+(\w+)\s*=", stripped)
+            if m and m.group(1)[0].isupper():
+                r.exports.append(m.group(1))
         elif re.match(r"^export\s", stripped):
             m = re.match(r"^export\s+(?:default\s+)?(?:function|class|const|let|var|type|interface)\s+(\w+)", stripped)
             if m:
@@ -405,7 +446,14 @@ _PARSERS: dict[str, callable] = {
     "yaml": _parse_yaml,
     "toml": _parse_yaml,
     "json": _parse_yaml,
+    "markdown": _parse_yaml,
+    "html": _parse_yaml,
+    "css": _parse_yaml,
+    "scss": _parse_yaml,
+    "less": _parse_yaml,
     "terraform": _parse_terraform,
     "elixir": _parse_elixir,
     "erlang": _parse_elixir,
+    "elisp": _parse_elisp,
+    "clojure": _parse_elisp,
 }
