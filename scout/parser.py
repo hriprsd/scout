@@ -320,6 +320,47 @@ def _parse_terraform(lines: list[str], r: ParseResult) -> None:
     r.exports = r.exports[:15]
 
 
+def _parse_elixir(lines: list[str], r: ParseResult) -> None:
+    """Parser for Elixir. Extracts modules, functions, structs, types."""
+    in_doc = False
+    for line in lines:
+        stripped = line.strip()
+        # Track heredoc strings to skip doc content
+        if '"""' in stripped or "'''" in stripped:
+            in_doc = not in_doc
+            continue
+        if in_doc:
+            continue
+        if re.match(r"^defmodule\s+", stripped):
+            m = re.match(r"^defmodule\s+([\w.]+)", stripped)
+            if m:
+                r.classes.append(m.group(1))
+        elif re.match(r"^defprotocol\s+", stripped):
+            m = re.match(r"^defprotocol\s+([\w.]+)", stripped)
+            if m:
+                r.classes.append(m.group(1))
+        elif re.match(r"^\s*defstruct\b", stripped):
+            r.types.append("defstruct")
+        elif re.match(r"^\s*def\s+(\w+)", stripped):
+            m = re.match(r"^\s*def\s+(\w+[\w?!]*)\s*(\([^)]*\))?", stripped)
+            if m:
+                r.functions.append(f"{m.group(1)}{_truncate_params(m.group(2) or '()')}")
+        elif re.match(r"^\s*defp\s+", stripped):
+            m = re.match(r"^\s*defp\s+(\w+[\w?!]*)", stripped)
+            if m:
+                r.functions.append(f"_{m.group(1)}")  # mark private
+        elif re.match(r"^\s*@callback\s+", stripped):
+            m = re.match(r"^\s*@callback\s+(\w+[\w?!]*)", stripped)
+            if m:
+                r.exports.append(m.group(1))
+        elif re.match(r"^\s*@type\s+", stripped):
+            m = re.match(r"^\s*@type\s+(\w+)", stripped)
+            if m:
+                r.types.append(m.group(1))
+        elif re.match(r"^\s*(alias|import|require|use)\s+", stripped):
+            r.imports.append(stripped)
+
+
 def _parse_generic(lines: list[str], r: ParseResult) -> None:
     for line in lines:
         stripped = line.strip()
@@ -365,4 +406,6 @@ _PARSERS: dict[str, callable] = {
     "toml": _parse_yaml,
     "json": _parse_yaml,
     "terraform": _parse_terraform,
+    "elixir": _parse_elixir,
+    "erlang": _parse_elixir,
 }
