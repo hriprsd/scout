@@ -110,10 +110,13 @@ def generate_tree(slug: str, repo_path: str) -> str:
         # Show depth-2 directories as indented lines.
         # Deeper dirs get folded into their depth-2 parent.
         depth2: dict[str, list[Card]] = defaultdict(list)
+        depth3_names: dict[str, set[str]] = defaultdict(set)
         for d in dir_paths:
             parts = Path(d).parts
             if len(parts) >= 2:
                 key = str(Path(parts[0]) / parts[1])
+                if len(parts) >= 3:
+                    depth3_names[key].add(parts[2])
             else:
                 key = d
             depth2[key].extend(cards_by_dir[d])
@@ -123,9 +126,22 @@ def generate_tree(slug: str, repo_path: str) -> str:
                 continue
             child_cards = depth2[child_key]
             child_name = str(Path(child_key).relative_to(group_name))
-            child_summary = _dir_summary(child_cards, dir_name=child_name)
-            child_detail = f" - {child_summary}" if child_summary else ""
-            lines.append(f"  {child_name}/ ({len(child_cards)} files){child_detail}")
+            sub_packages = depth3_names.get(child_key, set())
+            # If many sub-packages folded in, show their names
+            # instead of symbols from one arbitrary sub-package
+            if len(sub_packages) > 3:
+                names = sorted(sub_packages)[:8]
+                names_str = ", ".join(names)
+                if len(sub_packages) > 8:
+                    names_str += f", +{len(sub_packages) - 8} more"
+                lines.append(
+                    f"  {child_name}/ ({len(child_cards)} files)"
+                    f" [{names_str}]"
+                )
+            else:
+                child_summary = _dir_summary(child_cards, dir_name=child_name)
+                child_detail = f" - {child_summary}" if child_summary else ""
+                lines.append(f"  {child_name}/ ({len(child_cards)} files){child_detail}")
 
     return "\n".join(lines)
 
@@ -164,6 +180,12 @@ def _dir_summary(cards: list[Card], dir_name: str = "") -> str:
 
     all_classes = _dedup(all_classes)
     all_exports = _dedup(all_exports)
+
+    # Deprioritize noise classes (warnings, errors, mixins)
+    _NOISE_SUFFIXES = ("Warning", "Error", "Exception", "Mixin")
+    core = [c for c in all_classes if not c.endswith(_NOISE_SUFFIXES)]
+    noise = [c for c in all_classes if c.endswith(_NOISE_SUFFIXES)]
+    all_classes = core + noise
 
     # Prefer classes, then exports, then top functions
     if all_classes:
