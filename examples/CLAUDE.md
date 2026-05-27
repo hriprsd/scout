@@ -6,11 +6,11 @@ Add this to your global `~/.claude/CLAUDE.md` or project-level `CLAUDE.md`.
 
 ## Codebase context via Scout
 
-Before exploring an unfamiliar repo or when you need to understand the project structure, run `scout context` to get a hierarchical summary of the codebase and current working set. This is cheaper than reading files individually.
+**Always run `scout context` before reading any files in a repo.** This gives you the full repo structure and my active working set in ~700 tokens instead of opening files blind. Only read full files when you need to edit them.
 
-- Run `scout context` to get the L0 workset (what I'm actively changing) + L1 repo map (directory summaries).
-- Run `scout context --full` to also include L2 file cards for files related to what I'm working on.
-- Run `scout card <file>` to get a compact summary of a specific file before reading it in full.
-- Run `scout tree` for a quick directory-level overview.
-- If scout is not initialized for the repo, run `scout init . && scout warm` first.
-- Prefer reading scout cards over opening files just to understand what they contain. Only read the full file when you need to edit it or see implementation details.
+- If `scout context` fails with a "not initialized" error, run `scout init . && scout warm` first, then retry.
+- `scout context` - L0 workset (what I'm actively changing) + L1 repo map (directory summaries). Start here, every time.
+- `scout context --full` - also include L2 file cards for files related to what I'm working on.
+- `scout card <file>` - compact summary of a specific file. Run this before reading a file in full.
+- `scout tree` - directory-level overview of the entire repo.
+- Do not open files just to understand what they contain. Use scout cards instead.

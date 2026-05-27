@@ -6,29 +6,20 @@ alwaysApply: true
 
 # Codebase context via Scout
 
-Before exploring an unfamiliar repo or when you need to understand the project structure, use scout to get a hierarchical summary instead of reading files individually.
+**Always run `scout context` before reading any files in a repo.** This gives you the full repo structure and the user's active working set in ~700 tokens instead of opening files blind. Only read full files when you need to edit them.
 
 ## Commands
 
-- `scout context` - L0 workset (active changes) + L1 repo map (directory summaries). Start here.
+- `scout context` - L0 workset (active changes) + L1 repo map (directory summaries). Start here, every time.
 - `scout context --full` - also include L2 file cards for related files. Use when you need more detail.
-- `scout card <file>` - compact summary of a specific file. Use before reading the full file.
+- `scout card <file>` - compact summary of a specific file. Run this before reading a file in full.
 - `scout tree` - directory-level overview of the entire repo.
 - `scout ls <dir>` - list all file cards in a directory.
 
-## When to use
-
-- Starting any task: run `scout context` first to understand the repo and what the user is working on.
-- Before reading a file: run `scout card <file>` to check if you actually need the full content.
-- When asked about repo structure: run `scout tree` instead of `find` or directory listings.
-
 ## Setup
 
-If scout is not initialized for the current repo:
-```bash
-scout init . && scout warm
-```
+If `scout context` fails with a "not initialized" error, run `scout init . && scout warm` first, then retry.
 
 ## Key rule
 
-Prefer scout cards over opening files just to understand what they contain. Only read the full file when you need to edit it or see implementation details.
+Do not open files just to understand what they contain. Use scout cards instead. Only read the full file when you need to edit it or see implementation details.
