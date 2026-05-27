@@ -295,6 +295,31 @@ def _parse_ruby(lines: list[str], r: ParseResult) -> None:
                 r.functions.append(f"{prefix}{m.group(2)}{m.group(3) or ''}")
 
 
+def _parse_yaml(lines: list[str], r: ParseResult) -> None:
+    """Parser for YAML files. Extracts nothing.
+
+    YAML structural keys (apiVersion, kind, metadata) appear in every
+    file and add zero signal. Let the directory listing speak for itself.
+    """
+    pass
+
+
+def _parse_terraform(lines: list[str], r: ParseResult) -> None:
+    """Parser for Terraform/HCL. Extracts resource, module, variable, output."""
+    seen: set[str] = set()
+    for line in lines:
+        stripped = line.strip()
+        m = re.match(
+            r'^(resource|module|variable|output|data)\s+"([^"]+)"', stripped
+        )
+        if m:
+            symbol = f"{m.group(1)} {m.group(2)}"
+            if symbol not in seen:
+                seen.add(symbol)
+                r.exports.append(symbol)
+    r.exports = r.exports[:15]
+
+
 def _parse_generic(lines: list[str], r: ParseResult) -> None:
     for line in lines:
         stripped = line.strip()
@@ -336,4 +361,8 @@ _PARSERS: dict[str, callable] = {
     "java": _parse_java,
     "kotlin": _parse_java,
     "ruby": _parse_ruby,
+    "yaml": _parse_yaml,
+    "toml": _parse_yaml,
+    "json": _parse_yaml,
+    "terraform": _parse_terraform,
 }
