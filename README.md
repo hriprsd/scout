@@ -37,7 +37,7 @@ Context is served in three tiers:
 | **L1 - Repo map** | One-line summary per directory | 0.5-2K |
 | **L2 - File cards** | Per-file cards with signatures and exports | ~50 per file |
 
-For a 29-file repo, `scout context` produces ~84 tokens. The raw files are ~9M tokens. For larger repos the ratio gets even better because most files are cold and only the L1 directory line exists in the output.
+For a 29-file repo, `scout context` produces ~84 tokens. The raw files are ~9M tokens. On Django (7,048 files), `scout context` produces 34 lines that show the full module hierarchy, key types (`AppConfig`, `Signal`, `Atomic`, `cached_property`), and the entry point. The ratio gets better as repos grow because most files are cold and only the L1 directory line exists in the output.
 
 ## Why Scout over existing tools
 
