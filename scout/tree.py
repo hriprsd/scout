@@ -31,6 +31,14 @@ _NOISE_WORDS = {
     "util", "utilitie", "implement", "definition", "file",
 }
 
+# Patterns that identify test files across languages
+_TEST_FILE_PATTERNS = ("_test.go", "_test.py", "test_", "_spec.", ".spec.", ".test.")
+
+
+def _is_test_file(rel_path: str) -> bool:
+    name = Path(rel_path).name
+    return any(p in name for p in _TEST_FILE_PATTERNS)
+
 
 def generate_tree(slug: str, repo_path: str) -> str:
     cdir = cards_dir(slug)
@@ -159,13 +167,24 @@ def _dir_summary(cards: list[Card], dir_name: str = "") -> str:
     all_classes: list[str] = []
     all_exports: list[str] = []
     all_functions: list[str] = []
-    for c in cards:
-        all_classes.extend(c.classes[:2])
+
+    # Process source files before test files so real API surfaces first
+    src_cards = [c for c in cards if not _is_test_file(c.rel_path)]
+    test_cards = [c for c in cards if _is_test_file(c.rel_path)]
+    for c in src_cards + test_cards:
+        # Prefer public classes over private/internal
+        pub_cls = [x for x in c.classes if not x.startswith("_")]
+        prv_cls = [x for x in c.classes if x.startswith("_")]
+        all_classes.extend(pub_cls[:2])
+        all_classes.extend(prv_cls[:1])
         all_exports.extend(c.exports[:3])
-        # Prefer public functions (no leading underscore)
-        public = [f for f in c.functions if not f.lstrip().startswith("_")]
+        # Prefer public functions, deprioritize Test* and underscore
+        public = [f for f in c.functions
+                  if not f.lstrip().startswith(("_", "Test"))]
+        test_fn = [f for f in c.functions if f.lstrip().startswith("Test")]
         private = [f for f in c.functions if f.lstrip().startswith("_")]
         all_functions.extend(public[:3])
+        all_functions.extend(test_fn[:1])
         all_functions.extend(private[:1])
 
     # Deduplicate while preserving order
