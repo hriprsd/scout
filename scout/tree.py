@@ -100,11 +100,10 @@ def generate_tree(slug: str, repo_path: str) -> str:
             lines.append(f"{group_name}/ ({len(cards)} files, {total_lines} lines){detail}")
             continue
 
-        # Group with subdirs: header + indented children
-        all_cards = []
-        for d in dir_paths:
-            all_cards.extend(cards_by_dir[d])
-        summary = _dir_summary(all_cards, dir_name=group_name)
+        # Group with subdirs: header uses only root-level cards
+        # (not children) to avoid bubbling up child symbols
+        root_cards = cards_by_dir.get(group_name, [])
+        summary = _dir_summary(root_cards, dir_name=group_name)
         detail = f" - {summary}" if summary else ""
         lines.append(f"{group_name}/ ({total_files} files, {total_lines} lines){detail}")
 
@@ -141,13 +140,30 @@ def _dir_summary(cards: list[Card], dir_name: str = "") -> str:
             if part:
                 dir_words.add(part)
 
-    all_classes = []
-    all_exports = []
-    all_functions = []
+    all_classes: list[str] = []
+    all_exports: list[str] = []
+    all_functions: list[str] = []
     for c in cards:
         all_classes.extend(c.classes[:2])
         all_exports.extend(c.exports[:3])
-        all_functions.extend(c.functions[:2])
+        # Prefer public functions (no leading underscore)
+        public = [f for f in c.functions if not f.lstrip().startswith("_")]
+        private = [f for f in c.functions if f.lstrip().startswith("_")]
+        all_functions.extend(public[:3])
+        all_functions.extend(private[:1])
+
+    # Deduplicate while preserving order
+    def _dedup(items: list[str]) -> list[str]:
+        seen: set[str] = set()
+        result = []
+        for item in items:
+            if item not in seen:
+                seen.add(item)
+                result.append(item)
+        return result
+
+    all_classes = _dedup(all_classes)
+    all_exports = _dedup(all_exports)
 
     # Prefer classes, then exports, then top functions
     if all_classes:
@@ -156,12 +172,14 @@ def _dir_summary(cards: list[Card], dir_name: str = "") -> str:
         return ", ".join(all_exports[:4])
     if all_functions:
         names = []
-        for f in all_functions[:4]:
+        seen: set[str] = set()
+        for f in all_functions:
             name = f.split("(")[0].strip()
-            if name:
+            if name and name not in seen:
+                seen.add(name)
                 names.append(name)
         if names:
-            return ", ".join(names)
+            return ", ".join(names[:4])
 
     # No structural symbols found. Don't fall back to purpose keywords
     # because they're usually noise ("Application entry point for X").
