@@ -1,5 +1,7 @@
 <p align="center">
   <img src="assets/logo.png" alt="Scout" width="200">
+  <br>
+  <em>A German Shorthaired Pointer. They find things.</em>
 </p>
 
 <h1 align="center">Scout</h1>
@@ -8,6 +10,20 @@
 <p align="center">
   <strong>Zero dependencies. Pure Python. Works with any tool.</strong>
 </p>
+
+---
+
+- [The problem](#the-problem)
+- [How Scout works](#how-scout-works)
+- [Why Scout over existing tools](#why-scout-over-existing-tools)
+- [Install](#install)
+- [Command reference](#command-reference)
+- [How it works internally](#how-it-works-internally)
+- [Supported languages](#supported-languages)
+- [Integration examples](#integration-examples)
+- [Benchmarks](#benchmarks)
+- [Blog posts](#blog-posts)
+- [Roadmap](#roadmap)
 
 ---
 
