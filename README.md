@@ -348,6 +348,11 @@ Fewer tokens doesn't mean less useful. Scout's context is structurally complete 
 
 Detailed analysis with examples in [`benchmarks/functional-comparison.md`](benchmarks/functional-comparison.md). Full methodology and reproduction steps in [`benchmarks/`](benchmarks/).
 
+## Blog posts
+
+- [I Built a Codebase Indexer That Uses 700x Fewer Tokens Than Dumping Your Repo](https://medium.com/@hriprsd/i-built-a-codebase-indexer-that-uses-700x-fewer-tokens-than-dumping-your-repo-9c8314f86a23)
+- [Building Scout Part 2: Regex Parsers, Content Addressing, and Zero Dependencies](https://medium.com/@hriprsd/building-scout-part-2-regex-parsers-content-addressing-and-zero-dependencies-cc976eaac339)
+
 ## Roadmap
 
 - [ ] `scout watch` - filesystem watcher for real-time card updates
