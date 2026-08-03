@@ -77,19 +77,28 @@ def find_repo_slug_by_path(repo_path: str) -> Optional[str]:
 def resolve_slug(repo_path: Optional[str] = None) -> tuple[str, RepoMeta]:
     if repo_path is None:
         repo_path = _find_git_root()
-    repo_path = str(Path(repo_path).resolve())
-    slug = find_repo_slug_by_path(repo_path)
-    if slug is None:
-        raise SystemExit(f"Repo not initialized. Run: scout init {repo_path}")
-    meta = load_meta(slug)
-    if meta is None:
-        raise SystemExit(f"Corrupted repo metadata for {slug}")
-    return slug, meta
+    start = Path(repo_path).resolve()
+    # Walk up from the given path so scout works from ANY subdirectory of a
+    # registered repo, not just its root.
+    for candidate in [start, *start.parents]:
+        slug = find_repo_slug_by_path(str(candidate))
+        if slug is not None:
+            meta = load_meta(slug)
+            if meta is None:
+                raise SystemExit(f"Corrupted repo metadata for {slug}")
+            return slug, meta
+    # Not registered anywhere up the tree. Point the user at the git root they
+    # should init, not the subdirectory they happen to be standing in.
+    try:
+        suggest = _find_git_root(start)
+    except SystemExit:
+        suggest = str(start)
+    raise SystemExit(f"Repo not initialized. Run: scout init {suggest}")
 
 
-def _find_git_root() -> str:
-    cwd = Path.cwd()
-    for parent in [cwd, *cwd.parents]:
+def _find_git_root(start: Optional[Path] = None) -> str:
+    base = start or Path.cwd()
+    for parent in [base, *base.parents]:
         if (parent / ".git").exists():
             return str(parent)
     raise SystemExit("Not inside a git repository. Run from a repo or pass a path.")

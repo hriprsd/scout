@@ -168,15 +168,25 @@ def _resolve_init_paths(paths: list[str], scan: bool) -> list[str]:
                 if child.is_dir() and (child / ".git").exists():
                     repos.append(str(child))
         else:
-            # single path that's not a git repo and --scan not set
-            _err(f"Not a git repository: {resolved}")
-            _err(f"  Use --scan to find git repos inside this directory")
+            # Not a git root itself. Walk UP to find the enclosing repo so
+            # `scout init <subdir>` just works instead of erroring out.
+            root = next(
+                (str(parent) for parent in Path(resolved).parents
+                 if (parent / ".git").exists()),
+                None,
+            )
+            if root:
+                repos.append(root)
+            else:
+                _err(f"Not a git repository: {resolved}")
+                _err(f"  Use --scan to find git repos inside this directory")
     return repos
 
 
 def cmd_warm(args: argparse.Namespace) -> None:
     repo_path = str(Path(args.path).resolve())
     slug, meta = resolve_slug(repo_path)
+    repo_path = meta.path
 
     files = collect_files(repo_path, meta.ignore_patterns)
     total = len(files)
@@ -221,6 +231,7 @@ def cmd_warm(args: argparse.Namespace) -> None:
 def cmd_card(args: argparse.Namespace) -> None:
     repo_path = str(Path(args.repo_path).resolve())
     slug, meta = resolve_slug(repo_path)
+    repo_path = meta.path
     file_path = args.file_path
 
     abs_file = Path(repo_path) / file_path
@@ -242,7 +253,8 @@ def cmd_card(args: argparse.Namespace) -> None:
 
 def cmd_context(args: argparse.Namespace) -> None:
     repo_path = str(Path(args.path).resolve())
-    slug, _meta = resolve_slug(repo_path)
+    slug, meta = resolve_slug(repo_path)
+    repo_path = meta.path
 
     output = generate_context(
         repo_path=repo_path,
@@ -257,6 +269,7 @@ def cmd_context(args: argparse.Namespace) -> None:
 def cmd_status(args: argparse.Namespace) -> None:
     repo_path = str(Path(args.path).resolve())
     slug, meta = resolve_slug(repo_path)
+    repo_path = meta.path
 
     files = collect_files(repo_path, meta.ignore_patterns)
     total_files = len(files)
@@ -299,6 +312,7 @@ def cmd_status(args: argparse.Namespace) -> None:
 def cmd_gc(args: argparse.Namespace) -> None:
     repo_path = str(Path(args.path).resolve())
     slug, meta = resolve_slug(repo_path)
+    repo_path = meta.path
 
     cdir = cards_dir(slug)
     if not cdir.exists():
@@ -335,13 +349,15 @@ def cmd_gc(args: argparse.Namespace) -> None:
 
 def cmd_ls(args: argparse.Namespace) -> None:
     repo_path = str(Path(args.repo_path).resolve())
-    slug, _meta = resolve_slug(repo_path)
+    slug, meta = resolve_slug(repo_path)
+    repo_path = meta.path
     print(generate_dir_cards(slug, args.dir_path))
 
 
 def cmd_tree(args: argparse.Namespace) -> None:
     repo_path = str(Path(args.path).resolve())
-    slug, _meta = resolve_slug(repo_path)
+    slug, meta = resolve_slug(repo_path)
+    repo_path = meta.path
     print(generate_tree(slug, repo_path))
 
 
