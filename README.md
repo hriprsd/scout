@@ -328,9 +328,9 @@ Measured on Apple M4 Pro. Scout vs [Repomix](https://github.com/yamadashy/repomi
 
 | Metric | Scout | Repomix | Repomix --compress |
 |--------|------:|--------:|-------------------:|
-| **Output size** | 31.7 KB (~7.9K tokens) | 22.4 MB (~5.6M tokens) | 19.2 MB (~4.8M tokens) |
+| **Output size** | 4.7 KB (~1.2K tokens) | 23.9 MB (~6.0M tokens) | 19.2 MB (~4.8M tokens) |
 | **Generation time** | 0.75s | 3.04s | 2.18s |
-| **Token reduction** | **1x (baseline)** | **705x larger** | **605x larger** |
+| **Token reduction** | **1x (baseline)** | **~5,000x larger** | **~4,000x larger** |
 
 ### Incremental updates (1 file changed)
 
@@ -354,7 +354,7 @@ Scout trades a small amount of disk space for dramatically fewer tokens and fast
 
 Fewer tokens doesn't mean less useful. Scout's context is structurally complete -- the LLM gets the same navigational information in a fraction of the space.
 
-**Context window limits.** Repomix output for Flask (296K tokens) doesn't fit in GPT-4o (128K) or Claude (200K). FastAPI at 5.6M tokens doesn't fit in any model. Scout output is always under 8K tokens -- fits everywhere.
+**Context window limits.** Repomix output for Flask (296K tokens) doesn't fit in GPT-4o (128K) or Claude (200K). FastAPI at ~6M tokens doesn't fit in any model. Scout output is always under 8K tokens -- fits everywhere.
 
 **Intent awareness.** Scout reads your git state and tells the LLM what you're working on. Active files get full source. Everything else gets a one-line directory summary. Repomix dumps all files equally regardless of what you're doing.
 

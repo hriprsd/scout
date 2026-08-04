@@ -14,7 +14,7 @@ Most LLMs have hard context limits. If your repo context doesn't fit, the tool i
 
 **Repomix output fits?**
 
-| Model | Flask (296K tokens) | Express (181K tokens) | FastAPI (5.6M tokens) |
+| Model | Flask (296K tokens) | Express (181K tokens) | FastAPI (6.0M tokens) |
 |-------|:-------------------:|:---------------------:|:---------------------:|
 | GPT-4o (128K) | No | No | No |
 | Claude Sonnet (200K) | No | Yes | No |
@@ -22,7 +22,7 @@ Most LLMs have hard context limits. If your repo context doesn't fit, the tool i
 
 **Scout output fits?**
 
-| Model | Flask (680 tokens) | Express (686 tokens) | FastAPI (7.9K tokens) |
+| Model | Flask (680 tokens) | Express (686 tokens) | FastAPI (1.2K tokens) |
 |-------|:------------------:|:--------------------:|:---------------------:|
 | GPT-4o (128K) | Yes | Yes | Yes |
 | Claude Sonnet (200K) | Yes | Yes | Yes |
